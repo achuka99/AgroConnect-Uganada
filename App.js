@@ -12,6 +12,8 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import CreatePostScreen from './screens/CreatePostScreen';
 import PostDetailsScreen from './screens/PostDetailsScreen';
 import { LoginScreen, RegisterScreen } from './screens/LoginAndRegisterScreens';
+import ProfileScreen from './screens/ProfileScreen';
+import AppBar from './Components/AppBar';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -23,7 +25,8 @@ function BottomTabs(){
   return (
     <Tab.Navigator
       screenOptions={{
-        headerShown: false,
+        //headerShown: false,
+        header: (props) => <AppBar {...props} />,
       }}
       tabBar={({ navigation, state, descriptors, insets }) => (
         <BottomNavigation.Bar
@@ -87,7 +90,18 @@ function BottomTabs(){
           },
         }}
       />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          tabBarLabel: 'Profile',
+          tabBarIcon: ({ color, size }) => {
+            return <Icon name="account-outline" size={size} color={color} />;
+          },
+        }}
+      />
     </Tab.Navigator>
+    
   )
 }
 

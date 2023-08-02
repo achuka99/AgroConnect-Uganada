@@ -1,48 +1,58 @@
-import React, { useState } from 'react';
-import { View, TextInput, StyleSheet, Text } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
-import { Button } from 'react-native-paper';
-import { useDispatch } from 'react-redux';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, Text } from 'react-native';
+import { Button , TextInput} from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import { setUser } from '../src/features/community/userSlice';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { auth, db } from '../firebase';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+import { addDoc, collection } from 'firebase/firestore';
+import LanguageSelectionDialog from '../Components/LanguageSelectionDialog';
+
+
 
 const LoginScreen = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const dispatch = useDispatch();
   const navigation = useNavigation();
 
-  const handleLogin = () => {
-    // Performing login logic here using my backend API
-    const userData = {
-      email: email,
-      password: password
-    };
+  useEffect(() => {
+    checkUserLoggedIn();
+  }, []);
 
-    // Make API call to authenticate the user
-    fetch('https://sunbird-backend.onrender.com/api/login', {
-        method: 'POST',
-        headers: {
-        'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(userData),
-    })
-        .then((response) => response.json())
-        .then((data) => {
-        // Handle the response from the backend
-        console.log('Login response:', data);
-        // Dispatch the user action to Redux store
-        dispatch(setUser(data.user));
-        // Additional logic after successful login
-        navigation.navigate('Home');
-        })
-        .catch((error) => {
-        console.error('Login error:', error);
-        // Handle the error
-        });
-    };
+  const checkUserLoggedIn = async () => {
+    try {
+      // Check if the 'userEmail' and 'userId' are stored in AsyncStorage
+      const userEmail = await AsyncStorage.getItem('userEmail');
+      const userId = await AsyncStorage.getItem('userId');
 
+      // If both userEmail and userId are not null, the user is logged in
+      if (userEmail !== null && userId !== null) {
+        // User is logged in, navigate to the Home screen
+        navigation.replace('Home');
+      } else {
+        // User is not logged in, do nothing (stay on the Login screen)
+      }
+    } catch (error) {
+      console.error('Error checking user login:', error);
+    }
+  };
 
+  const handleLogin = async () => {
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+  
+      // Store user email and user ID in AsyncStorage for future use
+      await AsyncStorage.setItem('userEmail', email);
+      await AsyncStorage.setItem('userId', user.uid);
+  
+      // You can redirect the user to the home screen or another part of the app after successful login.
+      navigation.navigate('Home');
+    } catch (error) {
+      console.error('Error signing in:', error);
+    }
+  };
+  
   return (
     <View style={styles.container}>
       <Text style={{ 
@@ -80,51 +90,52 @@ const RegisterScreen = () => {
   const [password, setPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [district, setDistrict] = useState('');
-  const [language, setLanguage] = useState('');
   const navigation = useNavigation();
 
-  const handleRegister = () => {
-   
+  const [dialogVisible, setDialogVisible] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState('');
 
-    // Performing registration logic here using my backend API
-    const userData = {
-      name: name,
-      email: email,
-      password: password,
-      password_confirmation: passwordConfirmation,
-    //   location: district,
-    //   language: language
-    };
-    console.log(userData)
+  const showDialog = () => setDialogVisible(true);
+  const hideDialog = () => setDialogVisible(false);
 
-    // Make API call to register the user
-    fetch('https://sunbird-backend.onrender.com/api/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(userData)
-    })
-      .then(response => response.json())
-      .then(data => {
-        // Handle the response from the backend
-        console.log('Registration response:', data);
-        // Additional logic after successful registration
-        navigation.navigate('Login');
-      })
-      .catch(error => {
-        console.error('Registration error:', error);
-        // Handle the error
-      });
+  const handleLanguageSelect = (language) => {
+    setSelectedLanguage(language);
   };
 
+
+  const handleRegister = async () => {
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+  
+      // After successful registration, add the user details to a "users" collection
+      const usersRef = collection(db, 'users');
+      await addDoc(usersRef, { 
+        uid: user.uid,
+        name,
+        district,
+        language: selectedLanguage,
+      });
+  
+      // Store user email and user ID in AsyncStorage for future use
+      await AsyncStorage.setItem('userEmail', email);
+      await AsyncStorage.setItem('userId', user.uid);
+       
+      // You can also redirect the user to the home screen or another part of the app here,
+      navigation.navigate('Home');
+    } catch (error) {
+      console.error('Error registering user:', error);
+    }
+  };
+  
   return (
     <View style={styles.container}>
        <Text style={{ 
         color: 'green',
-    paddingBottom: 10,
-    fontSize: 25,
-    fontWeight: 'bold',}}> Agriconnect Uganda</Text>
+        paddingBottom: 10,
+        fontSize: 25,
+        fontWeight: 'bold',
+        }}> Agriconnect Uganda</Text>
       <TextInput
         style={styles.input}
         placeholder="Name"
@@ -157,21 +168,21 @@ const RegisterScreen = () => {
         value={district}
         onChangeText={text => setDistrict(text)}
       />
-      <Text>Select Language:</Text>
-      <Picker
-        selectedValue={language}
-        onValueChange={value => setLanguage(value)}
-        style={styles.picker}
-      >
-        <Picker.Item label="Luganda" value="Luganda" />
-        <Picker.Item label="Runyankole" value="Runyankole" />
-        <Picker.Item label="Ateso" value="Ateso" />
-        <Picker.Item label="Lugbara" value="Lugbara" />
-        <Picker.Item label="Acholi" value="Acholi" />
-      </Picker>
+   
+      <Text>Select Language: {selectedLanguage}</Text>
+      <Button mode="contained" onPress={showDialog}>
+        Open Language Selection
+      </Button>
+      <LanguageSelectionDialog
+        visible={dialogVisible}
+        onDismiss={hideDialog}
+        onLanguageSelect={handleLanguageSelect}
+        selectedLanguage={selectedLanguage}
+      />
       <Button mode="contained" onPress={handleRegister}>
          Register
       </Button>
+
     </View>
   );
 };
@@ -184,16 +195,13 @@ const styles = StyleSheet.create({
   },
   input: {
     width: '80%',
-    height: 40,
-    borderColor: 'gray',
-    borderWidth: 1,
-    marginBottom: 10,
+    marginBottom: 5,
     paddingHorizontal: 10,
   },
   picker: {
     width: '80%',
     height: 40,
-    borderColor: 'gray',
+    borderColor: 'blue',
     borderWidth: 1,
   },
 });

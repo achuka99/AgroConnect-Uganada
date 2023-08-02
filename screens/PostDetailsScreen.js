@@ -1,16 +1,42 @@
-import { selectPostById } from '../src/reducers/communitySelectors';
 import React, { useEffect, useState } from 'react';
-import { View, Image, ScrollView, TextInput, TouchableOpacity} from 'react-native';
-import { useSelector, useDispatch } from 'react-redux';
-import { addComment, addLike, removeLike } from '../src/features/community/communitySlice';
-import { Ionicons, FontAwesome } from '@expo/vector-icons';
+import { View, ScrollView, Image, Alert, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { Appbar, Button, Chip, Text  } from 'react-native-paper';
 import axios from 'axios';
-import { Appbar, Button, Card, Text } from 'react-native-paper';
+import { collection, query, orderBy, onSnapshot, addDoc, where, getDocs } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { Avatar, Card, IconButton } from 'react-native-paper';
+import CommentCard from '../Components/CommentCard';
 
-const PostDetailsScreen = ({ route, navigation }) => {
-  const { postId } = route.params;
-  const dispatch = useDispatch();
-  const [comment, setComment] = useState('');
+const PostDetailsScreen = ({ navigation, route }) => {
+  const { postId, postTitle, postDescription, image, cropName } = route.params;
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState('');
+  const user = auth.currentUser;
+  const [userData, setUserData] = useState(null);
+
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const q = query(collection(db, 'users'), where('uid', '==', user.uid));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+          const userDoc = querySnapshot.docs[0];
+          const userData = { id: userDoc.id, ...userDoc.data() };
+          setUserData(userData);
+        } else {
+          console.log('User not found.');
+          setUserData(null);
+        }
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+        setError('Error fetching user data.');
+      } 
+    };
+
+    fetchUserData();
+  }, []);
 
   // Translation state variables
   const [translatedTitle, setTranslatedTitle] = useState('');
@@ -18,40 +44,26 @@ const PostDetailsScreen = ({ route, navigation }) => {
   const [translatedComments, setTranslatedComments] = useState([]);
   const [isTranslated, setIsTranslated] = useState(false);
 
-  // Use the selectPostById selector to retrieve the post
-  const post = useSelector(selectPostById(postId));
-
-  if (!post) {
-    // Handle the case when the post is not found
-    return (
-      <View>
-        <Text>Post not found</Text>
-      </View>
-    );
-  }
-
-  const { image, title, description } = post;
-
   // Translation function
   const translateText = async (text) => {
     try {
       const payload = {
         source_language: 'English',
-        target_language: 'Luganda', // Replace with the farmer's selected language
+        target_language: userData.language, // Replace with the farmer's selected language
         text: text,
       };
-
-      const token = process.env.sunbird_api;
-
+  
+      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJCcnVuby5Tc2VraXdlcmUiLCJleHAiOjQ4Mzg2ODkxNjB9.o3u4vpxvSd10b552mS5FkATKAVN_R2_uSwC8tP0G-I8';
+  
       const headers = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       };
-
+  
       const response = await axios.post('https://sunbird-ai-api-5bq6okiwgq-ew.a.run.app/tasks/translate', payload, {
         headers: headers,
       });
-
+  
       if (response.status === 200) {
         const translatedText = response.data.text;
         return translatedText;
@@ -65,111 +77,153 @@ const PostDetailsScreen = ({ route, navigation }) => {
     }
   };
 
+// Fetch comments from Firebase based on postId
+useEffect(() => {
+  const q = query(collection(db, 'comments'), where('post_id', '==', postId), orderBy('createdAt', 'asc'));
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const commentsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    setComments(commentsData);
+  });
+
+  return () => unsubscribe();
+}, [postId]);
+
+  const handleCommentSubmit = async () => {
+    try {
+      // Add a new comment to Firebase
+      const user = auth.currentUser;
+
+        // Check if the new comment is not empty or contains only spaces
+        if (newComment.trim() === '') {
+          // Display an alert or toast to inform the user that the fields cannot be empty
+          alert('Comment cannot be empty or contain only spaces');
+          return;
+        }
+
+      if(user) {
+        const newCommentData = {
+          uid: user.uid, // Replace with the authenticated user's ID
+          post_id: postId,
+          content: newComment,
+          createdAt: new Date(),
+        };
+  
+        await addDoc(collection(db, 'comments'), newCommentData);
+  
+        // Clear the new comment input field
+        setNewComment('');
+      }else {
+        Alert.alert('Please log in to add a comment.');
+      }
+      
+    } catch (error) {
+      console.error('Create comment error:', error);
+    }
+  };
+
   // Translate the post details and comments
   const translatePostDetails = async () => {
-    // Translate the title
-    const translatedTitle = await translateText(post.title);
-    setTranslatedTitle(translatedTitle);
+    const translatedPostTitle = await translateText(postTitle);
+    const translatedPostDescription = await translateText(postDescription);
+    const translatedPostComments = await Promise.all(comments.map((comment) => translateText(comment.content)));
 
-    // Translate the description
-    const translatedDescription = await translateText(post.description);
-    setTranslatedDescription(translatedDescription);
-
-    // Translate the comments
-    const translatedComments = await Promise.all(post.comments.map((comment) => translateText(comment.text)));
-    setTranslatedComments(translatedComments);
+    setTranslatedTitle(translatedPostTitle);
+    setTranslatedDescription(translatedPostDescription);
+    setTranslatedComments(translatedPostComments);
   };
 
-  // Handle translation of comments when post changes
   useEffect(() => {
-    if (post) {
-      translatePostDetails();
-    }
-  }, [post]);
-
-  const handleAddComment = () => {
-    const timestamp = new Date().getTime(); // Generate a unique timestamp
-    const newComment = {
-      id: timestamp,
-      text: comment,
-    };
-
-    dispatch(addComment({ postId, comment: newComment }));
-    setComment('');
-  };
-
-  // Handle adding and removing likes
-  const handleLike = () => {
-    dispatch(addLike(postId));
-  };
-
-  const handleUnlike = () => {
-    dispatch(removeLike(postId));
-  };
+    translatePostDetails();
+  }, [comments]);
 
   const handleTranslateToggle = () => {
     setIsTranslated(!isTranslated);
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: 'white', padding: 10, }}>
-          <Appbar.Header>
-                <Appbar.BackAction onPress={() => navigation.goBack()} />
-                <Appbar.Content title="Share your comment" />
-          </Appbar.Header>
+    <View style={{ flex: 1 }}>
+      <Appbar.Header>
+        <Appbar.BackAction onPress={() => navigation.goBack()} />
+        <Appbar.Content title="Share your comment" />
+      </Appbar.Header>
 
-          <Card style={{}}>
-                <Card.Cover source={{ uri: image }} />
-          </Card>
+      <Image source={{ uri: image }} style={{ height: 200, resizeMode: 'cover' }} />
+      <View style={{margin: 10}}>
+            <Button icon="translate" mode="text" onPress={handleTranslateToggle}>
+              {isTranslated ? 'Back to English' : 'Translate'}
+            </Button>
+            
+            <Chip icon="leaf" mode='flat' style={{ width: 200}} ><Text variant="bodySmall" style={{  marginTop: -10}}>{cropName}</Text></Chip>
 
-          <Button icon="translate" mode="text" onPress={handleTranslateToggle}>
-          {isTranslated ? 'Back to English' : 'Translate'}
-         </Button>
+            <Text variant="titleMedium">{isTranslated ? translatedTitle || postTitle : postTitle}</Text>
+            <Text variant="bodyMedium">{isTranslated ? translatedDescription || postDescription : postDescription}</Text>
 
-          <Text>{isTranslated ? translatedTitle || title : title}</Text>
-          <Text>{isTranslated ? translatedDescription || description : description}</Text>
+            <Text variant="labelMedium" style={{ color: 'green' }}>Comments</Text>
+      </View>
 
-           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-            <TouchableOpacity onPress={handleLike}>
-              <FontAwesome name="thumbs-up" size={24} color="green" />
-            </TouchableOpacity>
-            <Text style={{ marginLeft: 5 }}>{post.likes}</Text>
-            <TouchableOpacity onPress={handleUnlike} style={{ marginLeft: 10 }}>
-              <FontAwesome name="thumbs-down" size={24} color="green" />
-            </TouchableOpacity>
-          </View>
-
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
-        <View style={{ margin: 20 }}>
-          
+      <ScrollView contentContainerStyle={{ flexGrow: 1, margin: 10, }} showsVerticalScrollIndicator={false}>
+        <View style={{ }}>
           <View>
             {isTranslated
               ? translatedComments.map((comment, index) => (
-                  <View key={index} style={{ backgroundColor: '#f2f2f2', borderRadius: 5, padding: 10, marginBottom: 10 }}>
-                    <Text>{comment}</Text>
-                  </View>
+                    <Card  mode='contained' style={{ marginBottom: 10, width: '100%', }}> 
+                      <Card.Content>
+                        <Text variant="bodyMedium"  style={{ }}>{comment}</Text>
+                      </Card.Content>
+                    </Card>
                 ))
-              : post.comments.map((comment, index) => (
-                  <View key={index} style={{ backgroundColor: '#f2f2f2', borderRadius: 5, padding: 10, marginBottom: 10 }}>
-                    <Text>{comment.text}</Text>
-                  </View>
+              : comments.map((comment, index) => (
+                  <CommentCard
+                    key={comment.id}
+                    comment={comment}
+                  />
                 ))}
           </View>
         </View>
       </ScrollView>
-      <View style={{ margin: 20 }}>
-        <TextInput
-          value={comment}
-          onChangeText={setComment}
-          style={{ fontSize: 14, borderWidth: 1, borderColor: 'gray', padding: 5, borderRadius: 5, marginBottom: 10 }}
-          placeholder="Add a comment"
-        />
-        <Button icon="send" mode="contained" onPress={handleAddComment}>
-            Submit Comment
-        </Button>
-      </View>
+
+      <View style={styles.footer}>
+      <TextInput
+        value={newComment} 
+        onChangeText={setNewComment} 
+        placeholder="Write a comment" 
+        style={styles.textInput}
+      />
+      <TouchableOpacity activeOpacity={0.5} style={styles.sendButton}>
+              <IconButton
+                  icon="send"
+                  //iconColor={MD3Colors.error50}
+                  size={20}
+                  style={styles.sendButton}
+                  onPress={handleCommentSubmit}
+               />
+      </TouchableOpacity>
+    </View>
+
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 2,
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: '#d3d3d3',
+    height: 40,
+    borderRadius: 20,
+    marginLeft: 10,
+    marginRight: 10,
+    bottom: 0,
+    paddingLeft: 10,
+    borderWidth: 0, // Remove the border
+  },
+  sendButton: {
+    marginRight: 10,
+  },
+});
 
 export default PostDetailsScreen;

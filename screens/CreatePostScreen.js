@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
-import { View, TextInput, TouchableOpacity, Image, StyleSheet, ScrollView } from 'react-native';
-import { useDispatch } from 'react-redux';
-import { addPost } from '../src/features/community/communitySlice';
+import { View, TouchableOpacity, Image, StyleSheet, ScrollView } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
-import { Appbar, Button, Text } from 'react-native-paper';
+import { Appbar, Button, Text, TextInput } from 'react-native-paper';
+import { auth, db, storage } from '../firebase';
+import { addDoc, collection, query, orderBy, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'; // Import the storage functions from Firebase v9
 
 const CreatePostScreen = ({ navigation }) => {
-  const dispatch = useDispatch();
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [image, setImage] = useState(null);
+
+  const [newPost, setNewPost] = useState({
+    cropname: '',
+    title: '',
+    description: '',
+    image: null,
+  });
 
   const pickImage = async () => {
     // No permissions request is necessary for launching the image library
@@ -21,54 +25,70 @@ const CreatePostScreen = ({ navigation }) => {
       quality: 1,
     });
 
-    console.log(result);
-
     if (!result.canceled) {
-      setImage(result.assets[0].uri);
+      setNewPost({ ...newPost, image: result.uri });
+    } else {
+      alert('You did not select any image.')
     }
   };
 
-  const handleCreatePost = () => {
-    // const timestamp = new Date().getTime(); // Generate a unique timestamp
-    
-    const newPost = {
-      user_id: 3,
-      image: image,
-      title: title,
-      description: description,
-      // Add more properties as needed
-    };
-
-      // Make API call to create a new post
-    // fetch('https://sunbird-backend.onrender.com/api/addPosts', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json'
-    //   },
-    //   body: JSON.stringify(newPost)
-    // })
-    //   .then(response => response.json())
-    //   .then(data => {
-    //     // Handle the response from the backend
-    //     console.log('Create Post response:', data);
-    //     // Additional logic after successful registration
-    //     dispatch(addPost(newPost));
-    //     navigation.navigate('Community');
-    //   })
-    //   .catch(error => {
-    //     console.error('Post creation error:', error);
-    //     // Handle the error
-    //   });
-
-      dispatch(addPost(newPost));
-    
-    // Clear the form fields
-    setTitle('');
-    setDescription('');
-
-    // Navigate back to the CommunityScreen
-    navigation.goBack();
+  const handleAddPost = async () => {
+    try {
+      const user = auth.currentUser;
+      if (user) {
+        // Upload image to Firebase Storage
+        if (newPost.image) {
+          const response = await fetch(newPost.image);
+          const blob = await response.blob();
+          const storageRef = ref(storage, 'images/' + Date.now()); // Generate a unique filename using the current timestamp
+          const uploadTask = uploadBytesResumable(storageRef, blob);
+  
+          uploadTask.on('state_changed',
+            (snapshot) => {
+              // Progress updates here (optional)
+            },
+            (error) => {
+              console.error('Error uploading image:', error);
+            },
+            () => {
+              // Upload completed successfully, now we can get the download URL
+              getDownloadURL(uploadTask.snapshot.ref)
+                .then((downloadURL) => {
+                  // Now you can use the download URL to store it in Firestore or use it as needed
+                  // console.log('Download URL:', downloadURL);
+  
+                  // Add post to Firestore (with downloadURL)
+                  const postRef = collection(db, 'posts');
+                  addDoc(postRef, {
+                    ...newPost,
+                    createdAt: serverTimestamp(),
+                    uid: user.uid,
+                    image: downloadURL, // Add the downloadURL to the post data
+                  });
+                })
+                .catch((error) => {
+                  console.error('Error getting download URL:', error);
+                });
+            }
+          );
+        }
+  
+        setNewPost({
+          cropname: '',
+          title: '',
+          description: '',
+          image: null,
+        });
+      } else {
+        Alert.alert('Please log in to create a post.');
+      }
+    } catch (error) {
+      console.error('Error adding post:', error);
+    }
   };
+  
+
+
 
   return (
     <View style={{ flex: 1,  }}>
@@ -80,26 +100,32 @@ const CreatePostScreen = ({ navigation }) => {
       <ScrollView style={{ padding: 10,}}>
             <Text style={{ fontSize: 19, fontWeight: 'bold', marginBottom: 20 }}>Create Post</Text>
             <TextInput
-              style={{ fontSize: 18, borderWidth: 1, borderColor: 'gray', padding: 10, marginBottom: 20, borderRadius: 5 }}
-              placeholder="Your question to the community"
-              value={title}
-              onChangeText={setTitle}
+              placeholder="Crop Name"
+              style={styles.input}
+              value={newPost.cropname}
+              onChangeText={(text) => setNewPost({ ...newPost, cropname: text })}
             />
             <TextInput
-              style={{ fontSize: 18, borderWidth: 1, borderColor: 'gray', padding: 10, marginBottom: 20, borderRadius: 5 }}
+              placeholder="Your question to the community"
+              style={styles.input}
+              value={newPost.title}
+              onChangeText={(text) => setNewPost({ ...newPost, title: text })}
+            />
+            <TextInput
               placeholder="Description to your problem"
+              style={styles.input}
               multiline
-              value={description}
-              onChangeText={setDescription}
+              value={newPost.description}
+              onChangeText={(text) => setNewPost({ ...newPost, description: text })}
             />
             <TouchableOpacity style={styles.imageContainer} onPress={pickImage}>
-              {image ? (
-                <Image source={{ uri: image }} style={styles.image} />
-              ) : (
-                <Text style={styles.imagePlaceholder}>Pick an image</Text>
-              )}
-            </TouchableOpacity>
-            <Button icon="send" mode="contained" onPress={handleCreatePost}>
+        {newPost.image ? (
+          <Image source={{ uri: newPost.image }} style={styles.image} />
+        ) : (
+          <Text style={styles.imagePlaceholder}>Add an image</Text>
+        )}
+      </TouchableOpacity>
+            <Button icon="send" mode="contained" onPress={handleAddPost}>
                 Create
             </Button>
             
@@ -111,21 +137,27 @@ const CreatePostScreen = ({ navigation }) => {
 
 const styles = StyleSheet.create({ 
   imageContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#ccc',
     borderRadius: 5,
-    padding: 10,
-    marginBottom: 20,
-  },
-  image: {
     width: 200,
     height: 200,
-    resizeMode: 'cover',
+    marginBottom: 10,
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 5,
   },
   imagePlaceholder: {
     fontSize: 16,
-    color: '#777',
-    textAlign: 'center',
+    color: '#aaa',
+  },
+  input: {
+    marginBottom: 10,
+    paddingHorizontal: 10,
   },
 })
 

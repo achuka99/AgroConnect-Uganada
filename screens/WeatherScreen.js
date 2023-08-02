@@ -1,31 +1,61 @@
 import React, { useEffect, useState } from 'react';
-import { Text, View, StyleSheet, TouchableOpacity, ScrollView,  } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView,  } from 'react-native';
 import axios from 'axios';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import AppBar from '../Components/AppBar';
-import { Button, Surface } from 'react-native-paper';
+import { Button, Surface, Text } from 'react-native-paper';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { collection, query, orderBy, onSnapshot, addDoc, where, getDocs } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 
 const WeatherScreen = () => {
   const [currentWeather, setCurrentWeather] = useState(null);
   const [forecast, setForecast] = useState(null);
-  const apiKey = process.env.WEATHER_API;
+  const apiKey = 'b97fc8431ad249949d563725230807';
   const [translatedWeatherCondition, setTranslatedWeatherCondition] = useState('');
   const [translatedFarmActivity, setTranslatedFarmActivity] = useState('');
   const [translatedForecastDays, setTranslatedForecastDays] = useState([]);
   const [isTranslated, setIsTranslated] = useState(false);
+  const user = auth.currentUser;
+  const [userData, setUserData] = useState(null);
+
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const q = query(collection(db, 'users'), where('uid', '==', user.uid));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+          const userDoc = querySnapshot.docs[0];
+          const userData = { id: userDoc.id, ...userDoc.data() };
+          setUserData(userData);
+        } else {
+          console.log('User not found.');
+          setUserData(null);
+        }
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+        setError('Error fetching user data.');
+      } 
+    };
+
+    fetchUserData();
+  }, []);
+
 
   // Translate the weather condition
   const translateWeatherCondition = async () => {
     try {
       const payload = {
         source_language: 'English',
-        target_language: 'Luganda', // Replace with the farmer's selected language
+        target_language: userData.language, // Replace with the farmer's selected language
         text: currentWeather.current.condition.text,
       };
 
-      const token = process.env.sunbird_api;
+      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJCcnVuby5Tc2VraXdlcmUiLCJleHAiOjQ4Mzg2ODkxNjB9.o3u4vpxvSd10b552mS5FkATKAVN_R2_uSwC8tP0G-I8';
 
       const headers = {
         'Content-Type': 'application/json',
@@ -56,11 +86,11 @@ const WeatherScreen = () => {
     try {
       const payload = {
         source_language: 'English',
-        target_language: 'Luganda', // Replace with the farmer's selected language
+        target_language: userData.language, // Replace with the farmer's selected language
         text: getFarmActivity(),
       };
 
-      const token = process.env.sunbird_api;
+      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJCcnVuby5Tc2VraXdlcmUiLCJleHAiOjQ4Mzg2ODkxNjB9.o3u4vpxvSd10b552mS5FkATKAVN_R2_uSwC8tP0G-I8';
 
       const headers = {
         'Content-Type': 'application/json',
@@ -93,11 +123,11 @@ const WeatherScreen = () => {
         forecast.forecast.forecastday.map(async (day) => {
           const payload = {
             source_language: 'English',
-            target_language: 'Luganda', // Replace with the farmer's selected language
+            target_language: userData.language, // Replace with the farmer's selected language
             text: day.day.condition.text,
           };
 
-          const token = process.env.sunbird_api;
+          const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJCcnVuby5Tc2VraXdlcmUiLCJleHAiOjQ4Mzg2ODkxNjB9.o3u4vpxvSd10b552mS5FkATKAVN_R2_uSwC8tP0G-I8';
 
           const headers = {
             'Content-Type': 'application/json',
@@ -148,7 +178,7 @@ const WeatherScreen = () => {
           console.error('Error fetching current weather data:', error);
         });
 
-      const forecastUrl = `http://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${latitude},${longitude}&days=7`;
+      const forecastUrl = `http://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${latitude},${longitude}&days=2`;
 
       axios
         .get(forecastUrl)
@@ -221,14 +251,18 @@ const WeatherScreen = () => {
 
   return (
     <View style={{ flex: 1,}} >
-
-        <AppBar />
-
         <View style={styles.container}>
+        {/* <Text 
+        style={{color: 'green',
+        paddingBottom: 10,
+        fontSize: 25,
+        fontWeight: 'bold',
+        }}>Welcome, {userData.name}</Text> */}
+        
       {/* AppBar */}
-      <Text>Todays weather</Text>
+      <Text variant="labelLarge" >Todays weather</Text>
       
-      <Surface style={styles.currentWeatherContainer}  elevation={2}>
+      <Surface mode='flat' style={styles.currentWeatherContainer}  elevation={5}>
         <Text style={styles.currentTemp}>{currentTemp}°C</Text>
         <Text style={styles.weatherCondition}>{isTranslated ? translatedWeatherCondition : weatherCondition}</Text>
         <Text style={styles.farmActivity}>{isTranslated ? translatedFarmActivity : getFarmActivity()}</Text>
@@ -238,11 +272,11 @@ const WeatherScreen = () => {
             {isTranslated ? 'Back to English' : 'Translate'}
       </Button>
 
-      <Text>Weather forecasts</Text>
+      <Text variant="labelLarge" >Weather forecasts</Text>
 
       <ScrollView contentContainerStyle={styles.forecastContainer} showsVerticalScrollIndicator={false} >
         {forecastDays.map((day, index) => (
-          <Surface key={index} style={styles.forecastItem}>
+          <Surface mode='flat' elevation={5} key={index} style={styles.forecastItem}>
             <Text style={styles.forecastDay}>{day.date}</Text>
             <Text style={styles.forecastCondition}>{ isTranslated ? translatedForecastDays[index] : day.day.condition.text}</Text>
             <Text style={styles.forecastTemp}>{day.day.maxtemp_c}°C</Text>
